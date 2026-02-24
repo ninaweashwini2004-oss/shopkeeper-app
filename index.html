@@ -766,6 +766,7 @@
     <script type="module">
         // Firebase imports
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getAnalytics } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-analytics.js";
         import {
             getAuth,
             createUserWithEmailAndPassword,
@@ -790,19 +791,21 @@
             getDownloadURL
         } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js";
 
-        // Firebase Config
+        // Firebase Configuration
         const firebaseConfig = {
-            apiKey: "AIzaSyCzQYASGy_TlsnNHeVcYRrlEaOKKfQCuLA",
-            authDomain: "shop-8666a.firebaseapp.com",
-            databaseURL: "https://shop-8666a-default-rtdb.firebaseio.com",
-            projectId: "shop-8666a",
-            storageBucket: "shop-8666a.firebasestorage.app",
-            messagingSenderId: "435332345706",
-            appId: "1:435332345706:web:09bbde85c847b369513f13",
-            measurementId: "G-7JFQZK21EC"
+            apiKey: "AIzaSyAe0WEBOq25wgJ5uIQCy3UNvTUilP5T5Mo",
+            authDomain: "self-billing-app-for-payment.firebaseapp.com",
+            databaseURL: "https://self-billing-app-for-payment-default-rtdb.firebaseio.com",
+            projectId: "self-billing-app-for-payment",
+            storageBucket: "self-billing-app-for-payment.firebasestorage.app",
+            messagingSenderId: "811449012476",
+            appId: "1:811449012476:web:113ce231c67aaea08b4779",
+            measurementId: "G-W9GW7YKV62"
         };
 
+        // Initialize Firebase
         const app = initializeApp(firebaseConfig);
+        const analytics = getAnalytics(app);
         const auth = getAuth(app);
         const db = getDatabase(app);
         const storage = getStorage(app);
@@ -2415,7 +2418,7 @@
         window.handleEditImageUpload = handleEditImageUpload;
         window.scrapeAmazonProduct = scrapeAmazonProduct;
 
-        console.log('Mobile Shopkeeper app initialized with image upload and Amazon import');
+        console.log('Mobile Shopkeeper app initialized with new Firebase config');
     </script>
 </body>
 </html>
