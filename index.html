@@ -773,6 +773,26 @@
             color: #6b7280;
             margin-top: 8px;
         }
+
+        /* Delete confirmation */
+        .delete-confirm {
+            background: #fee2e2;
+            border: 1px solid #fecaca;
+            border-radius: 12px;
+            padding: 16px;
+            margin: 16px 0;
+            text-align: center;
+        }
+
+        .delete-confirm p {
+            color: #991b1b;
+            margin-bottom: 16px;
+        }
+
+        .delete-confirm-buttons {
+            display: flex;
+            gap: 10px;
+        }
     </style>
 </head>
 <body>
@@ -805,7 +825,8 @@
             getStorage,
             ref as storageRef,
             uploadBytes,
-            getDownloadURL
+            getDownloadURL,
+            deleteObject
         } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js";
 
         // Firebase Configuration
@@ -1659,6 +1680,50 @@
             }
         }
 
+        // ============ IMAGE DELETION FUNCTION ============
+        
+        /**
+         * Delete image from Firebase Storage
+         */
+        async function deleteImageFromStorage(imageUrl) {
+            if (!imageUrl || imageUrl === '' || imageUrl.startsWith('http') === false) {
+                console.log('No valid image URL to delete');
+                return true; // Return true if no image to delete
+            }
+
+            try {
+                // Create a reference to the file to delete
+                const imageRef = storageRef(storage, imageUrl);
+                
+                // Delete the file
+                await deleteObject(imageRef);
+                console.log('Image deleted successfully:', imageUrl);
+                return true;
+            } catch (error) {
+                console.error('Error deleting image:', error);
+                // Don't throw error, just log it - we still want to delete the product
+                return false;
+            }
+        }
+
+        /**
+         * Extract storage path from download URL
+         */
+        function getStoragePathFromUrl(downloadUrl) {
+            try {
+                // Parse the URL to get the path
+                const url = new URL(downloadUrl);
+                const pathMatch = url.pathname.match(/\/o\/(.+)/);
+                if (pathMatch && pathMatch[1]) {
+                    return decodeURIComponent(pathMatch[1]);
+                }
+                return null;
+            } catch (error) {
+                console.error('Error parsing storage URL:', error);
+                return null;
+            }
+        }
+
         // Modal Functions
         function showAddProductModal() {
             const modal = document.createElement('div');
@@ -2168,23 +2233,38 @@
                 // Get file extension
                 const extension = getFileExtension(file);
                 
-                // Generate unique filename
+                // Generate unique filename with timestamp to avoid caching issues
                 const timestamp = Date.now();
-                const filename = `products/${currentUser.uid}/${productId || timestamp}_${timestamp}.${extension}`;
+                const randomString = Math.random().toString(36).substring(2, 8);
+                const filename = `products/${currentUser.uid}/${productId}_${timestamp}_${randomString}.${extension}`;
+                
+                // Create storage reference
                 const imageRef = storageRef(storage, filename);
 
+                // Upload file with metadata
+                const metadata = {
+                    contentType: file.type,
+                    customMetadata: {
+                        'uploadedBy': currentUser.uid,
+                        'productId': productId,
+                        'uploadedAt': new Date().toISOString()
+                    }
+                };
+
                 // Upload file
-                await uploadBytes(imageRef, file);
+                const snapshot = await uploadBytes(imageRef, file, metadata);
+                console.log('Upload successful:', snapshot);
 
                 // Get download URL
                 const downloadURL = await getDownloadURL(imageRef);
                 
-                console.log(`Image uploaded: ${filename} (Original: ${(file.originalSize/1024).toFixed(1)}KB → Optimized: ${(file.size/1024).toFixed(1)}KB)`);
+                console.log(`Image uploaded: ${filename}`);
+                console.log(`Original: ${(file.originalSize/1024).toFixed(1)}KB → Optimized: ${(file.size/1024).toFixed(1)}KB`);
                 
                 return downloadURL;
             } catch (error) {
                 console.error('Image upload error:', error);
-                return null;
+                throw error; // Re-throw to handle in calling function
             }
         }
 
@@ -2209,11 +2289,15 @@
 
                 // If image file is selected, upload it
                 if (selectedImageFile) {
+                    showToast('Uploading image...');
                     const uploadUrl = await uploadImageToFirebase(selectedImageFile, productId);
                     if (uploadUrl) {
                         imageUrl = uploadUrl;
                     }
                 }
+
+                const shopNameSnapshot = await get(ref(db, 'shopkeepers/' + currentUser.uid + '/shopName'));
+                const shopName = shopNameSnapshot.val() || 'Shop';
 
                 const product = {
                     name: name.trim(),
@@ -2222,7 +2306,8 @@
                     imageUrl: imageUrl,
                     added: Date.now(),
                     shopId: currentUser.uid,
-                    shopName: (await get(ref(db, 'shopkeepers/' + currentUser.uid + '/shopName'))).val() || 'Shop'
+                    shopName: shopName,
+                    productId: productId
                 };
 
                 await set(ref(db, 'products/' + currentUser.uid + '/' + productId), product);
@@ -2260,10 +2345,22 @@
             }
 
             try {
+                // Get existing product to check for old image
+                const existingProductSnapshot = await get(ref(db, 'products/' + currentUser.uid + '/' + currentProductId));
+                const existingProduct = existingProductSnapshot.val();
+                
                 let imageUrl = imageUrlInput || '';
 
-                // If image file is selected, upload it
+                // If new image file is selected, upload it and delete old one
                 if (selectedImageFile) {
+                    showToast('Uploading new image...');
+                    
+                    // Delete old image if it exists and is from storage (not external URL)
+                    if (existingProduct && existingProduct.imageUrl && existingProduct.imageUrl.includes('firebasestorage')) {
+                        await deleteImageFromStorage(existingProduct.imageUrl);
+                    }
+                    
+                    // Upload new image
                     const uploadUrl = await uploadImageToFirebase(selectedImageFile, currentProductId);
                     if (uploadUrl) {
                         imageUrl = uploadUrl;
@@ -2305,17 +2402,37 @@
             showEditProductModal(productId);
         }
 
+        /**
+         * Delete product and its associated image
+         */
         async function deleteProduct(productId) {
             if (!confirm('Are you sure you want to delete this product?')) return;
 
             try {
-                await remove(ref(db, 'products/' + currentUser.uid + '/' + productId));
-                showToast('Product deleted');
-                loadProducts();
-                loadStats();
+                // Get product details first to get image URL
+                const productSnapshot = await get(ref(db, 'products/' + currentUser.uid + '/' + productId));
+                
+                if (productSnapshot.exists()) {
+                    const product = productSnapshot.val();
+                    
+                    // Delete image from storage if it exists and is from our storage
+                    if (product.imageUrl && product.imageUrl.includes('firebasestorage')) {
+                        showToast('Deleting product image...');
+                        await deleteImageFromStorage(product.imageUrl);
+                    }
+                    
+                    // Delete product from database
+                    await remove(ref(db, 'products/' + currentUser.uid + '/' + productId));
+                    
+                    showToast('✅ Product deleted successfully!');
+                    loadProducts();
+                    loadStats();
+                } else {
+                    showToast('Product not found');
+                }
             } catch (error) {
                 console.error('Delete product error:', error);
-                showToast('Error deleting product');
+                showToast('Error deleting product: ' + error.message);
             }
         }
 
@@ -2516,7 +2633,7 @@
         window.handleEditImageUpload = handleEditImageUpload;
         window.scrapeAmazonProduct = scrapeAmazonProduct;
 
-        console.log('Mobile Shopkeeper app initialized with enhanced image support');
+        console.log('Mobile Shopkeeper app initialized with enhanced image support and auto-delete');
     </script>
 </body>
 </html>
